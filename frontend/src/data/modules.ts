@@ -157,6 +157,17 @@ export const MODULES: ModuleMeta[] = [
     metrics: ["回填任务数", "已完成回填", "活跃回填"],
   },
   {
+    key: "backfill_handover",
+    name: "回填字段交接清单",
+    entity: "交接条目",
+    desc: "批量承接已审批的Schema变更，复核字典版本后交接给数据回填任务",
+    fields: ["湖表名", "变更字段", "字段定义", "变更版本", "关联字典版本"],
+    statuses: ["待复核", "已确认", "交接失败", "已交接"],
+    actions: ["复核交接"],
+    actionTargets: {"复核交接": "已确认"},
+    metrics: ["交接条目数", "已确认条目", "已交接条目"],
+  },
+  {
     key: "data_dictionary",
     name: "数据字典管理",
     entity: "字典条目",

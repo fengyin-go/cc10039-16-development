@@ -11,7 +11,7 @@
 .
 ├── frontend/                 Vue 3 + Vite + TypeScript 前端
 │   ├── src/views/WorkbenchView.vue|tsx  全部模块共享工作台
-│   ├── src/data/modules.ts              18个业务模块配置
+│   ├── src/data/modules.ts              21个业务模块配置
 │   ├── src/api/              统一请求封装
 │   └── vite.config.ts        dev server 配置（open: false）
 ├── backend/                  FastAPI（Python） 后端
@@ -64,6 +64,7 @@ npm run dev
 | 负载均衡配置 | `load_balance` | 分片配置 | 湖表名、当前分片数、分片策略 |
 | 元数据同步 | `metadata_sync` | 同步任务 | 任务名称、源端类型、目标端类型 |
 | 数据回填任务 | `backfill_job` | 回填任务 | 任务名称、目标湖表、回填时间范围 |
+| 回填字段交接 | `backfill_handover` | 交接条目 | 湖表名、变更字段、变更版本 |
 | 数据字典管理 | `data_dictionary` | 字典条目 | 字典名称、适用范围、值域列表 |
 | 任务调度 | `task_scheduler` | 调度任务 | 任务名称、调度表达式、关联管道 |
 | 存储告警规则 | `alert_rule` | 告警规则 | 规则名称、告警指标、告警级别 |

@@ -2,12 +2,15 @@
 
 提供 /api/cross/events, /api/cross/snapshots, /api/cross/pipeline-status 等端点，
 让前端和治理报告可以消费跨模块链路数据。
+另提供回填字段交接清单的批量提交与批量复核端点，支撑值班员一次提交多条
+已审批的 Schema 变更，并在部分失败后只重试未交接的条目。
 """
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.services import service_for, SERVICES
 from app.store import store
@@ -17,6 +20,7 @@ from app.services.storage_tier import StorageTierService
 from app.services.file_compaction import FileCompactionService
 from app.services.retention_mgr import RetentionMgrService
 from app.services.backfill_job import BackfillJobService
+from app.services.backfill_handover import BackfillHandoverService
 from app.services.govern_report import GovernReportService
 
 router = APIRouter(prefix="/api/cross", tags=["跨模块编排"])
@@ -54,6 +58,36 @@ def list_snapshots() -> dict[str, Any]:
 def cross_module_overview() -> dict[str, Any]:
     """跨模块统计概览。"""
     return store.cross_module_stats()
+
+
+class HandoverBatchPayload(BaseModel):
+    """批量交接提交：每条 change_id 指向一条已审批的 Schema 变更。"""
+
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class HandoverReviewPayload(BaseModel):
+    """批量复核：可按批次号限定范围，缺省复核全部未交接条目。"""
+
+    batch_id: str | None = None
+
+
+@router.post("/handover/batch")
+def submit_handover_batch(payload: HandoverBatchPayload) -> dict[str, Any]:
+    """值班员一次提交多条已审批的 Schema 变更，生成回填字段交接清单。"""
+    service = BackfillHandoverService()
+    result, message = service.submit_batch(payload.items)
+    if result is None:
+        return {"ok": False, "message": message, "batch_id": None, "created": 0, "results": []}
+    return {"ok": result["created"] > 0, "message": message, **result}
+
+
+@router.post("/handover/review")
+def review_handover_batch(payload: HandoverReviewPayload) -> dict[str, Any]:
+    """批量复核交接条目：只推进未交接的部分，已交接条目不重复处理。"""
+    service = BackfillHandoverService()
+    result, message = service.review_pending(payload.batch_id)
+    return {"ok": True, "message": message, **result}
 
 
 @router.get("/pipeline-status")

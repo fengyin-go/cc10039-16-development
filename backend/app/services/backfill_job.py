@@ -2,6 +2,8 @@
 
 支持回填检查点（checkpoint）：中断后可从上次位置继续，不会重复处理已完成的记录。
 上游接收 Schema 演进的不兼容变更事件，下游联动治理报告记录回填结果。
+启动时读取回填字段交接清单：字段未确认前不能发给回填任务；已确认的字段按
+变更版本开始写入，回填记录保留实际使用的字段定义；已发布的变更不会再次回填。
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ class BackfillJobService(BaseModuleService):
     _checkpoints: dict[int, int] = {}
 
     def start_backfill(self, entry_id: int) -> tuple[dict[str, Any] | None, str]:
-        """启动回填任务：检查 Schema 变更状态后启动。"""
+        """启动回填任务：先过交接清单闸门，再检查 Schema 变更状态后启动。"""
         entry = store.find(self.MODULE, entry_id)
         if entry is None:
             return None, "回填任务不存在"
@@ -45,6 +47,46 @@ class BackfillJobService(BaseModuleService):
         if active_backfills:
             return None, f"湖表 {table_name} 已有回填任务在执行中"
 
+        # 交接清单闸门：字段未确认前不能发给对应回填任务
+        handover_rows = [
+            row for row in store.rows("backfill_handover")
+            if row.get("湖表名") == table_name
+        ]
+        unconfirmed = [
+            row for row in handover_rows
+            if row.get("status") in ("待复核", "交接失败")
+        ]
+        if unconfirmed:
+            return None, (
+                f"湖表 {table_name} 还有 {len(unconfirmed)} 条交接字段未确认，"
+                "字段未确认前不能发给回填任务"
+            )
+
+        # 读取已确认的交接条目，按目标表的变更版本开始写入
+        backfill_inputs: list[dict[str, Any]] = []
+        for handover in handover_rows:
+            if handover.get("status") != "已确认":
+                continue
+            change = store.find("schema_evolution", int(handover.get("来源变更ID", 0) or 0))
+            handover["status"] = "已交接"
+            handover["pending"] = False
+            handover["abnormal"] = False
+            if change is not None and change.get("status") == "已执行":
+                # 已发布的字段变更不会被再次回填，只关闭条目
+                continue
+            if change is not None and change.get("status") == "待审批":
+                change["status"] = "已执行"
+                change["pending"] = False
+                change["abnormal"] = False
+            backfill_inputs.append({
+                "来源变更ID": handover.get("来源变更ID"),
+                "批次号": handover.get("批次号", ""),
+                "湖表名": table_name,
+                "变更字段": handover.get("变更字段", ""),
+                "字段定义": handover.get("字段定义", ""),
+                "变更版本": handover.get("变更版本", ""),
+            })
+
         # 初始化检查点
         checkpoint = self._checkpoints.get(entry_id, 0)
 
@@ -53,6 +95,24 @@ class BackfillJobService(BaseModuleService):
         entry["abnormal"] = False
         entry["处理记录数"] = str(checkpoint)
 
+        handover_note = ""
+        if backfill_inputs:
+            # 回填记录保留实际使用的字段定义，从变更版本开始写入
+            entry["回填输入"] = backfill_inputs
+            entry["起始变更版本"] = backfill_inputs[0]["变更版本"]
+            handover_note = (
+                f"，接收交接字段 {len(backfill_inputs)} 个，"
+                f"从变更版本 {entry['起始变更版本']} 开始写入"
+            )
+            store.log_event("backfill_handover_consumed", "backfill_handover", "backfill_job", {
+                "task_id": entry_id,
+                "table_name": table_name,
+                "inputs": [
+                    {"来源变更ID": item["来源变更ID"], "变更字段": item["变更字段"]}
+                    for item in backfill_inputs
+                ],
+            })
+
         store.log_event("backfill_started", "backfill_job", "backfill_job", {
             "task_id": entry_id,
             "table_name": table_name,
@@ -60,7 +120,10 @@ class BackfillJobService(BaseModuleService):
             "checkpoint": checkpoint,
         })
 
-        return entry, f"回填任务 {entry.get('任务名称')} 已启动，时间范围={time_range}，检查点从 {checkpoint} 开始"
+        return entry, (
+            f"回填任务 {entry.get('任务名称')} 已启动，时间范围={time_range}，"
+            f"检查点从 {checkpoint} 开始{handover_note}"
+        )
 
     def checkpoint_backfill(self, entry_id: int, processed_count: int) -> tuple[dict[str, Any] | None, str]:
         """更新回填检查点，支持断点续做。"""

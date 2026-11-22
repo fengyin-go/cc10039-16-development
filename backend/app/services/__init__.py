@@ -16,6 +16,7 @@ from app.services.schema_evolution import SchemaEvolutionService
 from app.services.load_balance import LoadBalanceService
 from app.services.metadata_sync import MetadataSyncService
 from app.services.backfill_job import BackfillJobService
+from app.services.backfill_handover import BackfillHandoverService
 from app.services.data_dictionary import DataDictionaryService
 from app.services.task_scheduler import TaskSchedulerService
 from app.services.alert_rule import AlertRuleService
@@ -38,6 +39,7 @@ SERVICES: dict[str, BaseModuleService] = {
     "load_balance": LoadBalanceService(),
     "metadata_sync": MetadataSyncService(),
     "backfill_job": BackfillJobService(),
+    "backfill_handover": BackfillHandoverService(),
     "data_dictionary": DataDictionaryService(),
     "task_scheduler": TaskSchedulerService(),
     "alert_rule": AlertRuleService(),
